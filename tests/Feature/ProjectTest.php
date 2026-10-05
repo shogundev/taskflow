@@ -42,7 +42,7 @@ class ProjectTest extends TestCase
     {
         $this->actingAs(User::factory()->create())
             ->post('/projects', ['name' => ''])
-            ->assertSessionHasErrors('name666');
+            ->assertSessionHasErrors('name');
 
         $this->assertDatabaseCount('projects', 0);
     }
