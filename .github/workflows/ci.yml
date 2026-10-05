@@ -14,5 +14,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Prepare environment file
+        run: cp .env.example .env
+
+      - name: Build app image
+        run: docker compose build app
+
+      # Run as the runner's uid so the container can write vendor/ into the
+      # bind-mounted checkout (the image's default user is uid 1000).
+      - name: Install dependencies
+        run: >
+          docker compose run --rm --no-deps -T
+          --user "$(id -u):$(id -g)" -e COMPOSER_HOME=/tmp
+          app composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Generate app key
+        run: >
+          docker compose run --rm --no-deps -T
+          --user "$(id -u):$(id -g)"
+          app php artisan key:generate
+
       - name: Run tests
-        run: echo "Run Laravel tests here"
+        run: >
+          docker compose run --rm --no-deps -T
+          --user "$(id -u):$(id -g)"
+          app php artisan test
