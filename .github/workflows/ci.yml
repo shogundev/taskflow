@@ -46,8 +46,64 @@ jobs:
           --user "$(id -u):$(id -g)"
           app php artisan test
 
-  publish-dev:
+  smoke-test:
     needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/production/Dockerfile
+          load: true
+          tags: taskflow:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start MySQL
+        run: |
+          docker network create smoke
+          docker run -d --name smoke-db --network smoke \
+            -e MYSQL_DATABASE=taskflow -e MYSQL_USER=taskflow -e MYSQL_PASSWORD=secret -e MYSQL_ROOT_PASSWORD=root \
+            mysql:8.0
+          for i in $(seq 1 40); do
+            docker exec smoke-db mysqladmin ping -h 127.0.0.1 -uroot -proot --silent 2>/dev/null && break
+            [ "$i" -eq 40 ] && { echo "MySQL did not become ready"; exit 1; }
+            sleep 3
+          done
+
+      - name: Migrate and create smoke-test user
+        run: |
+          echo "APP_KEY=base64:$(openssl rand -base64 32)" > app.env
+          cat >> app.env <<'ENV'
+          DB_CONNECTION=mysql
+          DB_HOST=smoke-db
+          DB_DATABASE=taskflow
+          DB_USERNAME=taskflow
+          DB_PASSWORD=secret
+          ENV
+          docker run --rm --network smoke --env-file app.env taskflow:ci php artisan migrate --force
+          # Seeders use Faker (dev-only), so create the smoke-test user directly.
+          docker run --rm --network smoke --env-file app.env taskflow:ci \
+            php artisan tinker --execute="App\\Models\\User::create(['name' => 'Smoke', 'email' => 'smoke@example.com', 'password' => 'smoke-password']);"
+
+      - name: Start app
+        run: docker run -d --name smoke-app --network smoke --env-file app.env -p 8080:80 taskflow:ci
+
+      - name: Smoke test
+        run: scripts/smoke-test.sh http://localhost:8080 smoke@example.com smoke-password
+
+      - name: App logs (on failure)
+        if: failure()
+        run: docker logs smoke-app
+
+  publish-dev:
+    needs: [test, smoke-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     environment: dev
@@ -83,3 +139,44 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-dev:
+    needs: publish-dev
+    runs-on: ubuntu-latest
+    environment: dev
+    concurrency: deploy-dev
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          DO_SSH_KEY: ${{ secrets.DO_SSH_KEY }}
+          DO_KNOWN_HOSTS: ${{ secrets.DO_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DO_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DO_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload compose file
+        run: scp deploy/docker-compose.dev.yml "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}:/opt/taskflow/docker-compose.yml"
+
+      # Image tag matches the "dev-<7 char sha>" tag pushed by publish-dev.
+      - name: Deploy
+        run: |
+          ssh "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}" bash -s <<ENDSSH
+            set -euo pipefail
+            cd /opt/taskflow
+            sed -i '/^IMAGE_TAG=/d' .env
+            echo "IMAGE_TAG=dev-${GITHUB_SHA::7}" >> .env
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker compose exec -T app php artisan migrate --force
+            docker image prune -f
+          ENDSSH
+
+      - name: Smoke test deployed app
+        run: scripts/smoke-test.sh "http://${{ secrets.DO_HOST }}" "${{ secrets.DEV_SMOKE_EMAIL }}" "${{ secrets.DEV_SMOKE_PASSWORD }}"
