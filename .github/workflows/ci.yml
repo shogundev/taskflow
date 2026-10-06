@@ -102,11 +102,12 @@ jobs:
         if: failure()
         run: docker logs smoke-app
 
-  publish-dev:
+  publish:
     needs: [test, smoke-test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    environment: dev
+    # develop deploys to the dev environment, main to staging
+    environment: ${{ github.ref_name == 'main' && 'staging' || 'dev' }}
     permissions:
       contents: read
 
@@ -126,8 +127,8 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/taskflow
           tags: |
-            type=raw,value=dev
-            type=sha,prefix=dev-
+            type=raw,value=${{ github.ref_name == 'main' && 'staging' || 'dev' }}
+            type=sha,prefix=${{ github.ref_name == 'main' && 'staging' || 'dev' }}-
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -140,13 +141,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy-dev:
-    needs: publish-dev
+  deploy:
+    needs: publish
     runs-on: ubuntu-latest
-    environment: dev
-    concurrency: deploy-dev
+    environment: ${{ github.ref_name == 'main' && 'staging' || 'dev' }}
+    concurrency: deploy-${{ github.ref_name }}
     permissions:
       contents: read
+    env:
+      ENV_NAME: ${{ github.ref_name == 'main' && 'staging' || 'dev' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/taskflow' }}
+      BASE_URL: ${{ vars.BASE_URL || format('http://{0}', secrets.DO_HOST) }}
+      SSH_TARGET: ${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}
 
     steps:
       - uses: actions/checkout@v4
@@ -162,16 +168,16 @@ jobs:
           printf '%s\n' "$DO_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Upload compose file
-        run: scp deploy/docker-compose.dev.yml "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}:/opt/taskflow/docker-compose.yml"
+        run: scp deploy/docker-compose.yml "$SSH_TARGET:$DEPLOY_PATH/docker-compose.yml"
 
-      # Image tag matches the "dev-<7 char sha>" tag pushed by publish-dev.
+      # Image tag matches the "<env>-<7 char sha>" tag pushed by the publish job.
       - name: Deploy
         run: |
-          ssh "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}" bash -s <<ENDSSH
+          ssh "$SSH_TARGET" bash -s <<ENDSSH
             set -euo pipefail
-            cd /opt/taskflow
+            cd $DEPLOY_PATH
             sed -i '/^IMAGE_TAG=/d' .env
-            echo "IMAGE_TAG=dev-${GITHUB_SHA::7}" >> .env
+            echo "IMAGE_TAG=$ENV_NAME-${GITHUB_SHA::7}" >> .env
             docker compose pull
             docker compose up -d --remove-orphans
             docker compose exec -T app php artisan migrate --force
@@ -179,4 +185,4 @@ jobs:
           ENDSSH
 
       - name: Smoke test deployed app
-        run: scripts/smoke-test.sh "http://${{ secrets.DO_HOST }}" "${{ secrets.DEV_SMOKE_EMAIL }}" "${{ secrets.DEV_SMOKE_PASSWORD }}"
+        run: scripts/smoke-test.sh "$BASE_URL" "${{ secrets.SMOKE_EMAIL }}" "${{ secrets.SMOKE_PASSWORD }}"

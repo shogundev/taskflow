@@ -1,5 +1,3 @@
-name: taskflow
-
 services:
   app:
     image: ${DOCKERHUB_USERNAME}/taskflow:${IMAGE_TAG:-dev}
