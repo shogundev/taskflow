@@ -40,6 +40,19 @@ docker compose down                              # stop everything
 docker compose down -v                           # stop and wipe the DB volume
 ```
 
+## Tests
+
+PHPUnit, using in-memory SQLite (configured in `phpunit.xml`), so no MySQL/Redis is
+needed to run them — this is what a CI pipeline should call.
+
+```bash
+docker compose exec app php artisan test            # inside the running stack
+docker compose run --rm app php artisan test        # one-off container (what CI will do)
+```
+
+The suite covers behavior only (HTTP responses, DB state, authorization), not
+implementation, so it should keep passing unchanged through the architecture refactor.
+
 ## Domain
 
 - A `User` owns `Project`s.
@@ -75,8 +88,6 @@ here is accidental — it's meant to be recognizable and fixable one principle a
   be bolted directly into controllers; there's no domain event bus.
 - **No API layer.** Only server-rendered Blade views exist; there's no versioned API,
   no API Resources/transformers.
-- **No tests.** `tests/` still has the framework skeleton but no feature/unit coverage
-  for this domain.
 
 ## Suggested refactor path
 
@@ -90,4 +101,5 @@ here is accidental — it's meant to be recognizable and fixable one principle a
    object) and delete the three duplicated copies.
 6. Introduce repository interfaces + Eloquent implementations bound in a service
    provider, to demonstrate dependency inversion concretely.
-7. Add feature tests before/while refactoring, so behavior is provably unchanged.
+7. Keep the existing test suite green after every step; add unit tests for new
+   services/repositories as they appear.
