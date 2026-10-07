@@ -37,6 +37,10 @@ ENV APP_ENV=production \
     APP_DEBUG=false \
     LOG_CHANNEL=stderr
 
+# Declared last so a new commit hash does not invalidate the cached layers above.
+ARG GIT_SHA=unknown
+ENV APP_VERSION=$GIT_SHA
+
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD wget -q --spider http://127.0.0.1/up || exit 1
 

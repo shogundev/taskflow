@@ -29,6 +29,12 @@ return [
     'env' => env('APP_ENV', 'production'),
 
     /*
+    | Commit hash baked into the image at build time (see docker/production/Dockerfile).
+    */
+
+    'version' => env('APP_VERSION', 'unknown'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Debug Mode
     |--------------------------------------------------------------------------

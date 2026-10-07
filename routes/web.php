@@ -5,11 +5,14 @@ use App\Http\Controllers\CommentController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\TaskController;
+use App\Http\Controllers\VersionController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return redirect(auth()->check() ? '/dashboard' : '/login');
 });
+
+Route::get('/version', VersionController::class);
 
 Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
 Route::post('/register', [AuthController::class, 'register']);
