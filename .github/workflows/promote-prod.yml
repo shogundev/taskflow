@@ -72,4 +72,5 @@ jobs:
           ENDSSH
 
       - name: Smoke test deployed app
-        run: scripts/smoke-test.sh "$BASE_URL" "${{ secrets.SMOKE_EMAIL }}" "${{ secrets.SMOKE_PASSWORD }}"
+        # The promoted image was built from the commit in its staging-<sha> tag.
+        run: scripts/smoke-test.sh "$BASE_URL" "${{ secrets.SMOKE_EMAIL }}" "${{ secrets.SMOKE_PASSWORD }}" "${SOURCE_TAG#staging-}"

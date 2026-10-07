@@ -62,6 +62,7 @@ jobs:
           file: docker/production/Dockerfile
           load: true
           tags: taskflow:ci
+          build-args: GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
 
@@ -96,7 +97,7 @@ jobs:
         run: docker run -d --name smoke-app --network smoke --env-file app.env -p 8080:80 taskflow:ci
 
       - name: Smoke test
-        run: scripts/smoke-test.sh http://localhost:8080 smoke@example.com smoke-password
+        run: scripts/smoke-test.sh http://localhost:8080 smoke@example.com smoke-password "${{ github.sha }}"
 
       - name: App logs (on failure)
         if: failure()
@@ -137,6 +138,7 @@ jobs:
           file: docker/production/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          build-args: GIT_SHA=${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
@@ -185,4 +187,4 @@ jobs:
           ENDSSH
 
       - name: Smoke test deployed app
-        run: scripts/smoke-test.sh "$BASE_URL" "${{ secrets.SMOKE_EMAIL }}" "${{ secrets.SMOKE_PASSWORD }}"
+        run: scripts/smoke-test.sh "$BASE_URL" "${{ secrets.SMOKE_EMAIL }}" "${{ secrets.SMOKE_PASSWORD }}" "${{ github.sha }}"
