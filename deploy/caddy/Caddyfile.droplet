@@ -1,0 +1,9 @@
+# Dev and staging share one server. Hostnames come from .env (DEV_HOST, STAGING_HOST).
+# Certificates are requested from Let's Encrypt and renewed automatically.
+{$DEV_HOST} {
+	reverse_proxy dev-app:80
+}
+
+{$STAGING_HOST} {
+	reverse_proxy staging-app:80
+}

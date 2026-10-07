@@ -1,0 +1,26 @@
+# One proxy per server. It owns ports 80 and 443 and routes by hostname to the app containers
+# that join the shared "web" network (create it once with: docker network create web).
+name: caddy
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
+
+volumes:
+  caddy_data:
+  caddy_config:
