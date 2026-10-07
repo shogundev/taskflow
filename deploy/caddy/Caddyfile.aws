@@ -1,0 +1,4 @@
+# Prod has its own server. The hostname comes from .env (PROD_HOST).
+{$PROD_HOST} {
+	reverse_proxy prod-app:80
+}

@@ -1,0 +1,64 @@
+name: Rollback
+
+# Manual only: put an environment back on an image that was published earlier.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to roll back"
+        type: choice
+        options: [dev, staging, prod]
+        required: true
+      tag:
+        description: "Image tag to run (for example prod-1a2b3c4)"
+        required: true
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency: deploy-${{ inputs.environment == 'dev' && 'develop' || inputs.environment == 'staging' && 'main' || 'prod' }}
+    permissions:
+      contents: read
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/taskflow' }}
+      BASE_URL: ${{ vars.BASE_URL || format('http://{0}', secrets.DO_HOST) }}
+      SSH_TARGET: ${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}
+      TARGET_ENV: ${{ inputs.environment }}
+      TARGET_TAG: ${{ inputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tag prefix must match the environment, so a staging image cannot land on prod by accident.
+      - name: Validate tag
+        run: |
+          [[ "$TARGET_TAG" =~ ^${TARGET_ENV}-[0-9a-f]{7}$ ]] || { echo "Tag must look like ${TARGET_ENV}-1a2b3c4"; exit 1; }
+          echo "TARGET_SHA=${TARGET_TAG##*-}" >> "$GITHUB_ENV"
+
+      - name: Configure SSH
+        env:
+          DO_SSH_KEY: ${{ secrets.DO_SSH_KEY }}
+          DO_KNOWN_HOSTS: ${{ secrets.DO_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DO_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DO_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      # Pull first with the tag passed through the environment, so a missing tag fails
+      # before .env is touched and the running version keeps running.
+      # No migrate here: rolling back the image does not roll back the database.
+      - name: Roll back
+        run: |
+          ssh "$SSH_TARGET" bash -s <<ENDSSH
+            set -euo pipefail
+            cd $DEPLOY_PATH
+            IMAGE_TAG=$TARGET_TAG docker compose pull
+            sed -i '/^IMAGE_TAG=/d' .env
+            echo "IMAGE_TAG=$TARGET_TAG" >> .env
+            docker compose up -d --remove-orphans
+          ENDSSH
+
+      - name: Smoke test rolled-back app
+        run: scripts/smoke-test.sh "$BASE_URL" "${{ secrets.SMOKE_EMAIL }}" "${{ secrets.SMOKE_PASSWORD }}" "$TARGET_SHA"
